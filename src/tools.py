@@ -2,22 +2,29 @@ from os.path import splitext, join, dirname
 from numpy import fromfile, zeros
 import sys
 
-def array2image(aData, colormap):
+def array2image(aData):
     ny, nx = aData.shape
     nn = nx*ny
 
-    image = zeros((4*nn), 'uint8')
+    image = zeros((4*nn), 'float32')
+
+    # Normalize 01
+    aData = aData.astype('float32')
+    minVal = aData.min()
+    aData -= minVal
+    maxVal = aData.max()
+    aData /= maxVal
+
     ind = 0
     for y in range(ny):
         for x in range(nx):
-            val = abs(aData[y, x])
-            val = min(254, val)
-            val = max(0, val)
-            c = colormap[val]
-            image[ind]   = c  # r
-            image[ind+1] = c  # g
-            image[ind+2] = c  # b
-            image[ind+3] = 255
+            # HU -1000 to 3000
+            val = aData[y, x]
+            
+            image[ind]   = val  # r
+            image[ind+1] = val  # g
+            image[ind+2] = val  # b
+            image[ind+3] = 1
 
             ind += 4
 
