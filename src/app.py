@@ -5,7 +5,11 @@ import numpy as np
 
 class MainApp():
     def __init__(self):
-        vp = dpg.create_viewport(title='GGEMS C-Arm', width=500, height=1080, clear_color=(39, 44, 53, 255)) # create viewport takes in config options too!
+        self.mainWinWidth = 620
+        self.mainWinHeight = 1080
+
+        vp = dpg.create_viewport(title='GGEMS C-Arm', width=self.mainWinWidth, height=self.mainWinHeight, 
+                                 clear_color=(39, 44, 53, 255)) # create viewport takes in config options too!
         dpg.setup_dearpygui(viewport=vp)
         dpg.show_viewport(vp)
 
@@ -19,8 +23,6 @@ class MainApp():
         self.colorLineOfSight = (174, 214, 241, 255) # light blue
         self.colorPatient = (253, 237, 236, 255) # light pink
 
-        
-
         # Size of the c-arm draw zone
         self.carmDrawWidth = 200
         self.carmDrawHeight = 200
@@ -33,21 +35,19 @@ class MainApp():
         ### Config C-arm (ref uses image frame)
         #
         # Source
-        self.carmDistISOSource = 400
+        self.carmDistISOSource = 600
         self.carmOrgPosSource = np.matrix([[0],
                                            [self.carmDistISOSource],
                                            [0]], 'float32')
         self.carmPosSource = np.copy(self.carmOrgPosSource)
 
         # Flat panel
-        self.carmDistISOPanel = dp = 600
+        self.carmDistISOPanel = dp = 400
         self.flatPanelHalfSize = hs = 200 # flatPanelHalfSize
         self.carmOrgPosPointsPanel = np.matrix([[-hs,  hs,  hs, -hs],
                                                 [-dp, -dp, -dp, -dp],
                                                 [ hs,  hs, -hs, -hs]], 'float32')
         self.carmPosPointsPanel = np.copy(self.carmOrgPosPointsPanel)
-
-        
 
         # Translation
         self.carmTranslation = np.matrix([[0],
@@ -64,17 +64,17 @@ class MainApp():
                                    [0, 0, 1]], 'float32')
 
         # Projection on ZY plane
-        scaling = 0.1
+        scaling = 0.15
         self.carmProjZY = np.matrix([[0,       0, scaling], 
                                      [0, scaling,       0], 
                                      [0,       0,       0]], 'float32')
         # Projection on XZ
-        self.carmProjXZ = np.matrix([[scaling, 0,        0], 
-                                     [0,       0, -scaling], 
+        self.carmProjXZ = np.matrix([[0,       0,  scaling], 
+                                     [scaling, 0,        0], 
                                      [0,       0,        0]], 'float32')
 
         # Patient
-        self.patientThoraxSize = (600*scaling, 200*scaling)  # mm (length, thickness)
+        self.patientThoraxSize = (600*scaling, 200*scaling, 300*scaling)  # mm (length, thickness, width)
         self.patientHead = (100*scaling)  # radius in mm
         self.patientArm = (100*scaling, 400*scaling, 100*scaling)  # offset, length, thickness in mm
 
@@ -157,7 +157,7 @@ class MainApp():
     def firstCarmDraw(self):
         ## Left view #################
         #
-        d = 2.5
+        d = 10
 
         # Frame
         dpg.draw_polygon(parent='render_carm_left', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
@@ -165,8 +165,8 @@ class MainApp():
         # Isocenter
         cx = self.panelFrame[0][0]
         cy = self.panelFrame[1][0]
-        dpg.draw_line(parent='render_carm_left', p1=(cx-d, cy), p2=(cx+d, cy), color=(255, 255, 255, 255))
-        dpg.draw_line(parent='render_carm_left', p1=(cx, cy-d), p2=(cx, cy+d), color=(255, 255, 255, 255))
+        dpg.draw_line(parent='render_carm_left', p1=(cx, cy), p2=(cx+d, cy), color=(0, 0, 255, 255))
+        dpg.draw_line(parent='render_carm_left', p1=(cx, cy), p2=(cx, cy+d), color=(0, 255, 0, 255))
                                                                               
         # Source
         dpg.draw_triangle(parent='render_carm_left', p1=(0, 0), p2=(0, 0), p3=(0, 0), color=self.colorSource, id='l_src')
@@ -197,13 +197,66 @@ class MainApp():
                                                            radius=self.patientHead, color=self.colorPatient)
         
 
+        ## Top view #################
+        #
+
+        # Frame
+        dpg.draw_polygon(parent='render_carm_top', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
+                                                            (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+        # Isocenter
+        cx = self.panelFrame[0][0]
+        cy = self.panelFrame[1][0]
+        dpg.draw_line(parent='render_carm_top', p1=(cx, cy), p2=(cx+d, cy), color=(0, 0, 255, 255))
+        dpg.draw_line(parent='render_carm_top', p1=(cx, cy), p2=(cx, cy+d), color=(255, 0, 0, 255))
+                                                                              
+        # Source
+        dpg.draw_triangle(parent='render_carm_top', p1=(0, 0), p2=(0, 0), p3=(0, 0), color=self.colorSource, id='t_src')
+
+        # Flat panel
+        dpg.draw_polygon(parent='render_carm_top', points=[(0, 0), (0, 0)], color=self.colorPanel, id='t_panel')
+
+        # Line of sight
+        dpg.draw_line(parent='render_carm_top', p1=(0, 0), p2=(0, 0), color=self.colorLineOfSight, id='t_los_1')
+        dpg.draw_line(parent='render_carm_top', p1=(0, 0), p2=(0, 0), color=self.colorLineOfSight, id='t_los_2')
+        dpg.draw_line(parent='render_carm_top', p1=(0, 0), p2=(0, 0), color=self.colorLineOfSight, id='t_los_3')
+        dpg.draw_line(parent='render_carm_top', p1=(0, 0), p2=(0, 0), color=self.colorLineOfSight, id='t_los_4')
+
+        # Patient
+        hLength = self.patientThoraxSize[0] // 2
+        hThick = self.patientThoraxSize[1] // 2
+        hWidth = self.patientThoraxSize[2] // 2
+        dpg.draw_rectangle(parent='render_carm_top', pmin=(self.panelFrame[0]-hLength, self.panelFrame[1]-hWidth), 
+                           pmax=(self.panelFrame[0]+hLength, self.panelFrame[1]+hWidth), rounding=2, color=self.colorPatient)
+
+        hArmLength = self.patientArm[1] // 2
+        offset = self.patientArm[0] // 2
+        ArmThick = self.patientArm[2]
+        dpg.draw_rectangle(parent='render_carm_top', 
+                           pmin=(self.panelFrame[0]-hArmLength+offset, self.panelFrame[1]-hWidth-ArmThick), 
+                           pmax=(self.panelFrame[0]+hArmLength+offset, self.panelFrame[1]-hWidth), rounding=2, color=self.colorPatient)
+        
+        dpg.draw_rectangle(parent='render_carm_top', 
+                           pmin=(self.panelFrame[0]-hArmLength+offset, self.panelFrame[1]+hWidth), 
+                           pmax=(self.panelFrame[0]+hArmLength+offset, self.panelFrame[1]+hWidth+ArmThick), rounding=2, color=self.colorPatient)
+
+        dpg.draw_circle(parent='render_carm_top', center=(hLength+self.patientHead+self.panelFrame[0], 
+                                                           self.panelFrame[1]), 
+                                                           radius=self.patientHead, color=self.colorPatient)
+
+        ## DDR view #################
+        #
+
+        # Frame
+        dpg.draw_polygon(parent='render_carm_ddr', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
+                                                            (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+
     def updateCarmDraw(self):
         # Compute new conf
         self.updateCarmConfiguration()
 
         d = 2.5
 
-        ## Left view
+        ## Left view ##################@
         #
                                                                               
         # Source
@@ -233,9 +286,39 @@ class MainApp():
         dpg.configure_item('l_los_3', p1=(px, py), p2=p3)
         dpg.configure_item('l_los_4', p1=(px, py), p2=p4)
 
+        ## Top view ##################@
+        #
+                                                                              
+        # Source
+        pSource = (self.carmProjXZ * self.carmPosSource) + self.panelFrame
+        px = pSource[0][0]
+        py = pSource[1][0] 
+        
+        s1 = (px-d, py-d)
+        s2 = (px+d, py-d)
+        s3 = (px,   py+d)
+
+        dpg.configure_item('t_src', p1=s1, p2=s2, p3=s3)
+
+        # Panel
+        pPanel = (self.carmProjXZ * self.carmPosPointsPanel) + self.panelFrame
+        pPanel = pPanel.A
+        p1 = (pPanel[0][0], pPanel[1][0])
+        p2 = (pPanel[0][1], pPanel[1][1])
+        p3 = (pPanel[0][2], pPanel[1][2])
+        p4 = (pPanel[0][3], pPanel[1][3])
+
+        dpg.configure_item('t_panel', points=[p1, p2, p3, p4, p1])
+
+        # Line of sight
+        dpg.configure_item('t_los_1', p1=(px, py), p2=p1)
+        dpg.configure_item('t_los_2', p1=(px, py), p2=p2)
+        dpg.configure_item('t_los_3', p1=(px, py), p2=p3)
+        dpg.configure_item('t_los_4', p1=(px, py), p2=p4)
+
 
     def show(self):
-        with dpg.window(label='Main Window', width=500, height=1080, pos=(0, 0), no_background=True,
+        with dpg.window(label='Main Window', width=self.mainWinWidth, height=self.mainWinHeight, pos=(0, 0), no_background=True,
                         no_move=True, no_resize=True, no_collapse=True, no_close=True, no_title_bar=True):
             dpg.add_text('Step 1', color=self.colorTitle)
             
@@ -252,6 +335,9 @@ class MainApp():
 
             dpg.add_same_line(spacing=0)
             dpg.add_drawlist(id='render_carm_top', width=self.carmDrawWidth, height=self.carmDrawHeight)
+
+            dpg.add_same_line(spacing=0)
+            dpg.add_drawlist(id='render_carm_ddr', width=self.carmDrawWidth, height=self.carmDrawHeight)
 
             dpg.add_text('LAO')
             dpg.add_same_line(spacing=10)
