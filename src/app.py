@@ -1,11 +1,10 @@
 import dearpygui.dearpygui as dpg
 from tools import importMHD, array2image
-import matplotlib.pyplot as plt
 import numpy as np
 
 class MainApp():
     def __init__(self):
-        self.mainWinWidth = 620
+        self.mainWinWidth = 630
         self.mainWinHeight = 1080
 
         vp = dpg.create_viewport(title='GGEMS C-Arm', width=self.mainWinWidth, height=self.mainWinHeight, 
@@ -27,6 +26,10 @@ class MainApp():
         self.carmDrawWidth = 200
         self.carmDrawHeight = 200
 
+        # Size of the ct draw zone
+        self.ctDrawWidth = 200
+        self.ctDrawHeight = 200
+
         # Change to draw frame
         self.panelFrame = np.matrix([[self.carmDrawWidth//2],
                                      [self.carmDrawHeight//2],
@@ -40,6 +43,7 @@ class MainApp():
                                            [self.carmDistISOSource],
                                            [0]], 'float32')
         self.carmPosSource = np.copy(self.carmOrgPosSource)
+        self.ctEnergy = 80.0
 
         # Flat panel
         self.carmDistISOPanel = dp = 400
@@ -79,6 +83,38 @@ class MainApp():
         self.patientArm = (100*scaling, 400*scaling, 100*scaling)  # offset, length, thickness in mm
 
 
+    def draw2DArrayTo(self, aImage, target_id, tex_id, nx, ny, width, height):
+        image = array2image(aImage)
+
+        with dpg.texture_registry():
+            dpg.add_static_texture(nx, ny, image, id=tex_id)
+
+        # Manage ratio and centering
+        ratio = nx / ny
+        if ratio > 1:
+            newWidth = width
+            newHeight = width / ratio
+            paddingH = (height-newHeight) / 2.0
+            paddingW = 0
+        elif ratio < 1:
+            newWidth = height * ratio
+            newHeight = height
+            paddingH = 0
+            paddingW = (width-newWidth) / 2.0
+        else:
+            newWidth = width
+            newHeight = height
+            paddingH = 0
+            paddingW = 0
+
+        print(tex_id, ratio, newWidth, newHeight, paddingW, paddingH)
+
+        dpg.draw_image(parent=target_id, texture_id=tex_id, 
+                       pmin=(paddingW+1, paddingH+1), 
+                       pmax=(paddingW+newWidth-1, paddingH+newHeight-1), 
+                       uv_min=(0, 0), uv_max=(1, 1)) 
+
+
     def open_mhd(self, sender, app_data):
         # print("Sender: ", sender)
         # print("App Data: ", app_data)
@@ -91,19 +127,14 @@ class MainApp():
             txt = '%s   %ix%ix%i pix   %4.2fx%4.2fx%4.2f mm' % (filename, nx, ny, nz, sx, sy, sz)
             dpg.set_value('txt_info_image_file', txt)
 
-            image = array2image(self.arrayRaw[nz//2])
+            self.draw2DArrayTo(self.arrayRaw[nz//2], 'render_ct_central', 'texture_ct_central', 
+                               nx, ny, self.ctDrawWidth, self.ctDrawHeight)
 
-            with dpg.texture_registry():
-                dpg.add_static_texture(nx, ny, image, id='texture_ct')
+            self.draw2DArrayTo(self.arrayRaw[:, ny//2, :], 'render_ct_coronal', 'texture_ct_coronal', 
+                               nx, nz, self.ctDrawWidth, self.ctDrawHeight)
 
-            dpg.draw_image(parent='render_ct', texture_id='texture_ct', pmin=(0, 0), pmax=(2*nx, 2*ny), uv_min=(0, 0), uv_max=(1, 1)) 
-            
-            # with dpg.window(label='Image slice', width=nx, height=ny):
-            #     dpg.add_image("texture_ct")
-
-            
         else:
-            pass
+            pass # TODO
 
     def callBackLAORAO(self, sender, app_data):
         ang = np.pi*app_data / 180.0
@@ -140,7 +171,7 @@ class MainApp():
         pass
 
     def callBackVoltage(self, sender, app_data):
-        pass
+        self.ctEnergy = app_data
 
     def updateCarmConfiguration(self):
         # Update source position
@@ -159,9 +190,7 @@ class MainApp():
         #
         d = 10
 
-        # Frame
-        dpg.draw_polygon(parent='render_carm_left', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
-                                                            (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+        
         # Isocenter
         cx = self.panelFrame[0][0]
         cy = self.panelFrame[1][0]
@@ -200,9 +229,7 @@ class MainApp():
         ## Top view #################
         #
 
-        # Frame
-        dpg.draw_polygon(parent='render_carm_top', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
-                                                            (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+        
         # Isocenter
         cx = self.panelFrame[0][0]
         cy = self.panelFrame[1][0]
@@ -246,10 +273,7 @@ class MainApp():
         ## DDR view #################
         #
 
-        # Frame
-        dpg.draw_polygon(parent='render_carm_ddr', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
-                                                            (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
-
+        
     def updateCarmDraw(self):
         # Compute new conf
         self.updateCarmConfiguration()
@@ -326,18 +350,36 @@ class MainApp():
             dpg.add_same_line(spacing=10)
             dpg.add_button(label='Open...', callback=lambda: dpg.show_item('file_dialog_id'))
             dpg.add_text('No file', id='txt_info_image_file', color=self.colorInfo)
-            dpg.add_drawlist(id='render_ct', width=200, height=200)
+            dpg.add_drawlist(id='render_ct_central', width=self.ctDrawWidth, height=self.ctDrawHeight)
+            # Frame
+            dpg.draw_polygon(parent='render_ct_central', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
+                             (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+            dpg.add_same_line(spacing=0)
+            dpg.add_drawlist(id='render_ct_coronal', width=self.ctDrawWidth, height=self.ctDrawHeight)
+            # Frame
+            dpg.draw_polygon(parent='render_ct_coronal', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
+                             (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))
 
             dpg.add_separator()
             dpg.add_text('Step 2', color=self.colorTitle)
             dpg.add_text('Imaging system parameters:')
-            dpg.add_drawlist(id='render_carm_left', width=self.carmDrawWidth, height=self.carmDrawHeight)         
+            dpg.add_drawlist(id='render_carm_left', width=self.carmDrawWidth, height=self.carmDrawHeight)
+            # Frame
+            dpg.draw_polygon(parent='render_carm_left', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
+                             (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))         
 
             dpg.add_same_line(spacing=0)
             dpg.add_drawlist(id='render_carm_top', width=self.carmDrawWidth, height=self.carmDrawHeight)
+            # Frame
+            dpg.draw_polygon(parent='render_carm_top', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
+                             (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
 
             dpg.add_same_line(spacing=0)
             dpg.add_drawlist(id='render_carm_ddr', width=self.carmDrawWidth, height=self.carmDrawHeight)
+            # Frame
+            dpg.draw_polygon(parent='render_carm_ddr', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
+                             (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+
 
             dpg.add_text('LAO')
             dpg.add_same_line(spacing=10)
@@ -370,8 +412,9 @@ class MainApp():
 
             dpg.add_text('Tube voltage')
             dpg.add_same_line(spacing=10)
-            dpg.add_slider_float(default_value=80, min_value=40, max_value=140, 
-                                 format="%.0f kV", callback=self.callBackVoltage)
+            dpg.add_input_float(default_value=self.ctEnergy, min_value=40, max_value=140, 
+                                format="%.2f kV", step=1, callback=self.callBackVoltage)
+            
 
             dpg.add_button(label='Reset', callback=self.callBackResetCarm)
 
