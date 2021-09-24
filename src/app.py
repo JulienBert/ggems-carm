@@ -1,6 +1,7 @@
 import dearpygui.dearpygui as dpg
 from tools import importMHD, array2image
 import numpy as np
+from fluoroscopy import fluoroscopy
 
 class MainApp():
     def __init__(self):
@@ -30,6 +31,16 @@ class MainApp():
         self.ctDrawWidth = 200
         self.ctDrawHeight = 200
 
+        # Fluorscopy viewer
+        # Flag that determine if the CT have to be reconvert into mumap
+        self.fluoRequestMuMap = True
+        self.fluoEngine = fluoroscopy()
+        self.fluoPanelNx = 256
+        self.fluoPanelNy = 256
+        self.fluoPanelSx = 2.0
+        self.fluoPanelSy = 2.0
+        self.fluoEnergy = 80.0
+
         # Change to draw frame
         self.panelFrame = np.matrix([[self.carmDrawWidth//2],
                                      [self.carmDrawHeight//2],
@@ -43,8 +54,7 @@ class MainApp():
                                            [self.carmDistISOSource],
                                            [0]], 'float32')
         self.carmPosSource = np.copy(self.carmOrgPosSource)
-        self.ctEnergy = 80.0
-
+        
         # Flat panel
         self.carmDistISOPanel = dp = 400
         self.flatPanelHalfSize = hs = 200 # flatPanelHalfSize
@@ -106,8 +116,6 @@ class MainApp():
             newHeight = height
             paddingH = 0
             paddingW = 0
-
-        print(tex_id, ratio, newWidth, newHeight, paddingW, paddingH)
 
         dpg.draw_image(parent=target_id, texture_id=tex_id, 
                        pmin=(paddingW+1, paddingH+1), 
@@ -171,7 +179,25 @@ class MainApp():
         pass
 
     def callBackVoltage(self, sender, app_data):
-        self.ctEnergy = app_data
+        self.fluoEnergy = app_data
+        # If the energy change the CT have to convert into mumap accordingly
+        self.fluoRequestMuMap = True
+
+    def callBackGetDDR(self):
+        self.fluoEngine.setPose(self.carmRotX, self.carmRotZ, self.carmTranslation)
+        self.fluoEngine.setCamera(self.fluoPanelNx, self.fluoPanelNy, 
+                                    self.fluoPanelSx, self.fluoPanelSy, self.carmDistISOPanel)
+
+        if self.fluoRequestMuMap:
+            self.fluoEngine.setSource(self.fluoEnergy, self.carmDistISOSource)
+            self.fluoEngine.setImage(self.arrayRaw, self.dictHeader)
+            self.fluoEngine.computeMuMap()
+            self.fluoRequestMuMap = False
+
+        imageDDR = self.fluoEngine.getProjection()
+
+        # self.draw2DArrayTo(imageDDR, 'render_carm_ddr', 'texture_ddr', nx, ny, self.carmDrawWidth, self.carmDrawHeight)
+
 
     def updateCarmConfiguration(self):
         # Update source position
@@ -341,6 +367,7 @@ class MainApp():
         dpg.configure_item('t_los_4', p1=(px, py), p2=p4)
 
 
+
     def show(self):
         with dpg.window(label='Main Window', width=self.mainWinWidth, height=self.mainWinHeight, pos=(0, 0), no_background=True,
                         no_move=True, no_resize=True, no_collapse=True, no_close=True, no_title_bar=True):
@@ -387,6 +414,8 @@ class MainApp():
                                  format="%.0f deg", callback=self.callBackLAORAO)
             dpg.add_same_line(spacing=10)
             dpg.add_text('RAO')
+            dpg.add_same_line(spacing=30)
+            dpg.add_button(label='Get DDR', callback=self.callBackGetDDR)
 
             dpg.add_text('CAU')
             dpg.add_same_line(spacing=10)
@@ -412,7 +441,7 @@ class MainApp():
 
             dpg.add_text('Tube voltage')
             dpg.add_same_line(spacing=10)
-            dpg.add_input_float(default_value=self.ctEnergy, min_value=40, max_value=140, 
+            dpg.add_input_float(default_value=self.fluoEnergy, min_value=40, max_value=140, 
                                 format="%.2f kV", step=1, callback=self.callBackVoltage)
             
 

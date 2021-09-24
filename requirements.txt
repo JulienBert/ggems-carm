@@ -1,2 +1,3 @@
 dearpygui==0.8.64
 numpy==1.21.2
+numba==0.54.0
