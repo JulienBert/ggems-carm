@@ -31,6 +31,13 @@ class MainApp():
         self.ctDrawWidth = 200
         self.ctDrawHeight = 200
 
+        # CT viewer
+        self.ctTexParams = {
+            'pMin': 0,
+            'pMax': 0,
+            'nbSlices': 0,
+        }
+
         # Fluorscopy viewer
         # Flag that determine if the CT have to be reconvert into mumap
         self.fluoRequestMuMap = True
@@ -135,14 +142,64 @@ class MainApp():
             txt = '%s   %ix%ix%i pix   %4.2fx%4.2fx%4.2f mm' % (filename, nx, ny, nz, sx, sy, sz)
             dpg.set_value('txt_info_image_file', txt)
 
-            self.draw2DArrayTo(self.arrayRaw[nz//2], 'render_ct_central', 'texture_ct_central', 
-                               nx, ny, self.ctDrawWidth, self.ctDrawHeight)
+            # Convert into texture
+            with dpg.texture_registry():
+                for iSlice in range(nz):
+                    image = array2image(self.arrayRaw[iSlice])
+                    dpg.add_static_texture(nx, ny, image, id='CT%i' % iSlice)
 
-            self.draw2DArrayTo(self.arrayRaw[:, ny//2, :], 'render_ct_coronal', 'texture_ct_coronal', 
-                               nx, nz, self.ctDrawWidth, self.ctDrawHeight)
+                    print('texture', iSlice)
+
+            # Manage ratio and centering
+            ratio = nx / ny
+            if ratio > 1:
+                newWidth = self.ctDrawWidth
+                newHeight = self.ctDrawWidth / ratio
+                paddingH = (self.ctDrawHeight-newHeight) / 2.0
+                paddingW = 0
+            elif ratio < 1:
+                newWidth = self.ctDrawHeight * ratio
+                newHeight = self.ctDrawHeight
+                paddingH = 0
+                paddingW = (self.ctDrawWidth-newWidth) / 2.0
+            else:
+                newWidth = self.ctDrawWidth
+                newHeight = self.ctDrawHeight
+                paddingH = 0
+                paddingW = 0
+
+            self.ctTexParams['pMin'] = (paddingW+1, paddingH+1)
+            self.ctTexParams['pMax'] = (paddingW+newWidth-1, paddingH+newHeight-1)
+
+            self.ctTexParams['nbSlices'] = nz
+
+            # Configure the slicer and draw the first image
+            dpg.configure_item('slicerCT', default_value=nz//2, max_value=nz)
+            dpg.draw_image(parent='render_ct', texture_id='CT%i' % (nz//2), 
+                           pmin=self.ctTexParams['pMin'], 
+                           pmax=self.ctTexParams['pMax'], 
+                           uv_min=(0, 0), uv_max=(1, 1),
+                           id='imageCT')
+
+            # self.draw2DArrayTo(self.arrayRaw[nz//2], 'render_ct_central', 'texture_ct_central', 
+            #                    nx, ny, self.ctDrawWidth, self.ctDrawHeight)
+
+            # self.draw2DArrayTo(self.arrayRaw[:, ny//2, :], 'render_ct_coronal', 'texture_ct_coronal', 
+            #                    nx, nz, self.ctDrawWidth, self.ctDrawHeight)
 
         else:
             pass # TODO
+
+    def callBackSlicerCT(self, sender, app_data):
+        dpg.delete_item('imageCT')
+        dpg.draw_image(parent='render_ct', texture_id='CT%i' % app_data, 
+                       pmin=self.ctTexParams['pMin'], 
+                       pmax=self.ctTexParams['pMax'], 
+                       uv_min=(0, 0), uv_max=(1, 1),
+                       id='imageCT')
+
+    def callBackSlicerMasks(self):
+        pass
 
     def callBackLAORAO(self, sender, app_data):
         ang = np.pi*app_data / 180.0
@@ -371,22 +428,34 @@ class MainApp():
     def show(self):
         with dpg.window(label='Main Window', width=self.mainWinWidth, height=self.mainWinHeight, pos=(0, 0), no_background=True,
                         no_move=True, no_resize=True, no_collapse=True, no_close=True, no_title_bar=True):
+            
+            ####################################################################
             dpg.add_text('Step 1', color=self.colorTitle)
             
             dpg.add_text('Select a patient file:')
             dpg.add_same_line(spacing=10)
             dpg.add_button(label='Open...', callback=lambda: dpg.show_item('file_dialog_id'))
             dpg.add_text('No file', id='txt_info_image_file', color=self.colorInfo)
-            dpg.add_drawlist(id='render_ct_central', width=self.ctDrawWidth, height=self.ctDrawHeight)
-            # Frame
-            dpg.draw_polygon(parent='render_ct_central', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
-                             (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))
-            dpg.add_same_line(spacing=0)
-            dpg.add_drawlist(id='render_ct_coronal', width=self.ctDrawWidth, height=self.ctDrawHeight)
-            # Frame
-            dpg.draw_polygon(parent='render_ct_coronal', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
+            
+            dpg.add_drawlist(id='render_ct', width=self.ctDrawWidth, height=self.ctDrawHeight)
+            dpg.draw_polygon(parent='render_ct', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
                              (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))
 
+            dpg.add_same_line(spacing=0)
+
+            dpg.add_drawlist(id='render_masks', width=self.ctDrawWidth, height=self.ctDrawHeight)
+            dpg.draw_polygon(parent='render_masks', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
+                             (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+
+            dpg.add_slider_int(default_value=0, min_value=0, max_value=0, width=self.ctDrawWidth,
+                               callback=self.callBackSlicerCT, id='slicerCT')
+
+            dpg.add_same_line(spacing=0)
+
+            dpg.add_slider_int(default_value=0, min_value=0, max_value=0, width=self.ctDrawWidth,
+                               callback=self.callBackSlicerMasks, id='slicerMasks')
+
+            ####################################################################
             dpg.add_separator()
             dpg.add_text('Step 2', color=self.colorTitle)
             dpg.add_text('Imaging system parameters:')
