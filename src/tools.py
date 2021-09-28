@@ -1,12 +1,28 @@
 from os.path import splitext, join, dirname
 from numpy import fromfile, zeros
+from numba import jit
 import sys
+
+@jit(nopython=True)
+def core_array2image(Image, aData, nx, ny):
+    ind = 0
+    for y in range(ny):
+        for x in range(nx):
+            # HU -1000 to 3000
+            val = aData[y, x]
+            
+            Image[ind]   = val  # r
+            Image[ind+1] = val  # g
+            Image[ind+2] = val  # b
+            Image[ind+3] = 1
+
+            ind += 4
+    return Image
 
 def array2image(aData):
     ny, nx = aData.shape
-    nn = nx*ny
 
-    image = zeros((4*nn), 'float32')
+    image = zeros(4*nx*ny, 'float32')
 
     # Normalize 01
     aData = aData.astype('float32')
@@ -15,20 +31,7 @@ def array2image(aData):
     maxVal = aData.max()
     aData /= maxVal
 
-    ind = 0
-    for y in range(ny):
-        for x in range(nx):
-            # HU -1000 to 3000
-            val = aData[y, x]
-            
-            image[ind]   = val  # r
-            image[ind+1] = val  # g
-            image[ind+2] = val  # b
-            image[ind+3] = 1
-
-            ind += 4
-
-    return image.tolist()
+    return core_array2image(image, aData, nx, ny).tolist()
 
 # open MHD file V1.2
 def importMHD(pathfilename):

@@ -344,7 +344,7 @@ class fluoroscopy:
                                [sy],
                                [sz]], 'float32')
 
-        
+        # Image space
         pos_source = np.add(pos_source, np.multiply(ctSize, ctSpacing)*0.5)
         pos_source = np.divide(pos_source, ctSpacing)
 
@@ -355,9 +355,11 @@ class fluoroscopy:
         panel_hheight = 0.5 * panel_height
 
         # Convertion for Numba calculation
-        org_pos = np.array([-(panel_hwidth  - 0.5*self.camSx),
-                              self.camDistIso, 
-                             (panel_hheight - 0.5*self.camSy)], 'float32')
+        org_pos = np.array([-panel_hwidth + 0.5*self.camSx,
+                            -self.camDistIso, 
+                             panel_hheight - 0.5*self.camSy], 'float32')
+
+
         sysTranslation = self.sysTrans.flatten().A[0]
         pos_source = pos_source.flatten().A[0]
         ctSize = ctSize.flatten().A[0]
@@ -366,15 +368,17 @@ class fluoroscopy:
         RotZ = self.sysRotZ.A
 
         image = np.zeros((self.camNy, self.camNx), 'float32')
-        
+
         projection = core_projection(image, self.phantom_mu, self.camNx, self.camNy, self.camSx, self.camSy, 
                                      org_pos, RotX, RotZ, sysTranslation, pos_source, ctSize, ctSpacing)
+
 
         # Post-process
         vmin = projection.min()
         projection -= vmin
         vmax = projection.max()
-        projection /= vmax
+        if vmax != 0:
+            projection /= vmax
 
         projection = np.exp(-3*projection)
 

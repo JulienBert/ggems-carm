@@ -141,14 +141,14 @@ class MainApp():
             filename = app_data['file_name']
             txt = '%s   %ix%ix%i pix   %4.2fx%4.2fx%4.2f mm' % (filename, nx, ny, nz, sx, sy, sz)
             dpg.set_value('txt_info_image_file', txt)
-
+            """
             # Convert into texture
+            dpg.configure_item('infoWindow', show=True)
             with dpg.texture_registry():
                 for iSlice in range(nz):
                     image = array2image(self.arrayRaw[iSlice])
                     dpg.add_static_texture(nx, ny, image, id='CT%i' % iSlice)
-
-                    print('texture', iSlice)
+            dpg.configure_item('infoWindow', show=False)
 
             # Manage ratio and centering
             ratio = nx / ny
@@ -180,12 +180,7 @@ class MainApp():
                            pmax=self.ctTexParams['pMax'], 
                            uv_min=(0, 0), uv_max=(1, 1),
                            id='imageCT')
-
-            # self.draw2DArrayTo(self.arrayRaw[nz//2], 'render_ct_central', 'texture_ct_central', 
-            #                    nx, ny, self.ctDrawWidth, self.ctDrawHeight)
-
-            # self.draw2DArrayTo(self.arrayRaw[:, ny//2, :], 'render_ct_coronal', 'texture_ct_coronal', 
-            #                    nx, nz, self.ctDrawWidth, self.ctDrawHeight)
+            """
 
         else:
             pass # TODO
@@ -246,14 +241,17 @@ class MainApp():
                                     self.fluoPanelSx, self.fluoPanelSy, self.carmDistISOPanel)
 
         if self.fluoRequestMuMap:
-            self.fluoEngine.setSource(self.fluoEnergy, self.carmDistISOSource)
+            #                            kVp -> peak MeV
+            self.fluoEngine.setSource(0.01*self.fluoEnergy/2.0, self.carmDistISOSource)
             self.fluoEngine.setImage(self.arrayRaw, self.dictHeader)
             self.fluoEngine.computeMuMap()
             self.fluoRequestMuMap = False
+            print('Convertion: ok')
 
         imageDDR = self.fluoEngine.getProjection()
 
-        # self.draw2DArrayTo(imageDDR, 'render_carm_ddr', 'texture_ddr', nx, ny, self.carmDrawWidth, self.carmDrawHeight)
+        self.draw2DArrayTo(imageDDR, 'render_carm_ddr', 'texture_ddr', self.fluoPanelNx, self.fluoPanelNy, 
+                           self.carmDrawWidth, self.carmDrawHeight)
 
 
     def updateCarmConfiguration(self):
@@ -365,7 +363,7 @@ class MainApp():
 
         ## Left view ##################@
         #
-                                                                              
+                                                                            
         # Source
         pSource = (self.carmProjZY * self.carmPosSource) + self.panelFrame
         px = pSource[0][0]
@@ -515,6 +513,12 @@ class MainApp():
             
 
             dpg.add_button(label='Reset', callback=self.callBackResetCarm)
+
+            ########## Popup ################################
+            with dpg.window(label='Info', pos=(self.mainWinWidth//4, self.mainWinHeight//2), width=self.mainWinWidth//2, # height=self.mainWinHeight, pos=(0, 0), no_background=True,
+                            no_move=True, no_resize=True, no_collapse=True, no_close=True, no_title_bar=True,
+                            id='infoWindow', show=False):
+                dpg.add_text('Loading...')
 
         self.firstCarmDraw()
         self.updateCarmDraw()
