@@ -40,16 +40,16 @@ def core_projection(image, phantom_mu, camNx, camNy, camSx, camSy, org_pos,
                     RotX, RotZ, sysTranslation, pos_source, ctSize, ctSpacing):
 
     nz, ny, nx = phantom_mu.shape
-    cur_pos_pix_x = org_pos[0]
+    cur_pos_pix_y = org_pos[1]
 
     for y in range(camNy):   # camNy
 
         # Update ray pos
-        cur_pos_pix_y = org_pos[1] - y*camSy 
+        cur_pos_pix_z = org_pos[2] - y*camSy 
 
         for x in range(camNx):    # camNx
             # Update ray pos
-            cur_pos_pix_z = org_pos[2] + x*camSx
+            cur_pos_pix_x = org_pos[0] + x*camSx
 
             mp1x = cur_pos_pix_x
             mp1y = RotX[1][1]*cur_pos_pix_y + RotX[1][2]*cur_pos_pix_z
@@ -157,8 +157,10 @@ class fluoroscopy:
 
     def computeMuMap(self):
         # convert phantom to the required energy
-        ctEnergy = 0.06 # MeV TODO pick the value from MHD
+        ctEnergy = 0.08 # MeV TODO pick the value from MHD
         # self.phantom_mu = self.convert2mumap_simple(self.srcEnergy)
+        # print(ctEnergy, self.srcEnergy)
+        
         self.phantom_mu = self.convert2mumap(ctEnergy, self.srcEnergy)
         # self.phantom_mu = self.volRaw.copy()
 
@@ -372,7 +374,6 @@ class fluoroscopy:
         projection = core_projection(image, self.phantom_mu, self.camNx, self.camNy, self.camSx, self.camSy, 
                                      org_pos, RotX, RotZ, sysTranslation, pos_source, ctSize, ctSpacing)
 
-
         # Post-process
         vmin = projection.min()
         projection -= vmin
@@ -381,6 +382,8 @@ class fluoroscopy:
             projection /= vmax
 
         projection = np.exp(-3*projection)
+
+        # projection.tofile('proj_256x256.raw')
 
         return projection
 

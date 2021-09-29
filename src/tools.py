@@ -35,16 +35,12 @@ def array2image(aData):
 
 # open MHD file V1.2
 def importMHD(pathfilename):
-    print("MHD", pathfilename)
 
     name, ext = splitext(pathfilename)
 
     if ext != '.mhd':
         print('File must be MHD file (.mhd)!')
         sys.exit()
-
-    
-    print(name, ext)
 
     lines = open(pathfilename, 'r').readlines()
 

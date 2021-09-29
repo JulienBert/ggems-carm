@@ -47,6 +47,7 @@ class MainApp():
         self.fluoPanelSx = 2.0
         self.fluoPanelSy = 2.0
         self.fluoEnergy = 80.0
+        self.fluoFlagFirstViewing = True
 
         # Change to draw frame
         self.panelFrame = np.matrix([[self.carmDrawWidth//2],
@@ -100,34 +101,37 @@ class MainApp():
         self.patientArm = (100*scaling, 400*scaling, 100*scaling)  # offset, length, thickness in mm
 
 
-    def draw2DArrayTo(self, aImage, target_id, tex_id, nx, ny, width, height):
-        image = array2image(aImage)
+    # def draw2DArrayTo(self, aImage, parent_id, draw_id, tex_id, nx, ny, width, height):
+    #     image = array2image(aImage)
 
-        with dpg.texture_registry():
-            dpg.add_static_texture(nx, ny, image, id=tex_id)
+    #     with dpg.texture_registry():
+    #         dpg.add_static_texture(nx, ny, image, id=tex_id)
 
-        # Manage ratio and centering
-        ratio = nx / ny
-        if ratio > 1:
-            newWidth = width
-            newHeight = width / ratio
-            paddingH = (height-newHeight) / 2.0
-            paddingW = 0
-        elif ratio < 1:
-            newWidth = height * ratio
-            newHeight = height
-            paddingH = 0
-            paddingW = (width-newWidth) / 2.0
-        else:
-            newWidth = width
-            newHeight = height
-            paddingH = 0
-            paddingW = 0
+    #     # Manage ratio and centering
+    #     ratio = nx / ny
+    #     if ratio > 1:
+    #         newWidth = width
+    #         newHeight = width / ratio
+    #         paddingH = (height-newHeight) / 2.0
+    #         paddingW = 0
+    #     elif ratio < 1:
+    #         newWidth = height * ratio
+    #         newHeight = height
+    #         paddingH = 0
+    #         paddingW = (width-newWidth) / 2.0
+    #     else:
+    #         newWidth = width
+    #         newHeight = height
+    #         paddingH = 0
+    #         paddingW = 0
 
-        dpg.draw_image(parent=target_id, texture_id=tex_id, 
-                       pmin=(paddingW+1, paddingH+1), 
-                       pmax=(paddingW+newWidth-1, paddingH+newHeight-1), 
-                       uv_min=(0, 0), uv_max=(1, 1)) 
+    #     if dpg.does_item_exist(draw_id):
+    #         dpg.delete_item(draw_id)
+    #     dpg.draw_image(parent=parent_id, texture_id=tex_id, 
+    #                    pmin=(paddingW+1, paddingH+1), 
+    #                    pmax=(paddingW+newWidth-1, paddingH+newHeight-1), 
+    #                    uv_min=(0, 0), uv_max=(1, 1),
+    #                    id=draw_id) 
 
 
     def open_mhd(self, sender, app_data):
@@ -141,7 +145,7 @@ class MainApp():
             filename = app_data['file_name']
             txt = '%s   %ix%ix%i pix   %4.2fx%4.2fx%4.2f mm' % (filename, nx, ny, nz, sx, sy, sz)
             dpg.set_value('txt_info_image_file', txt)
-            """
+            
             # Convert into texture
             dpg.configure_item('infoWindow', show=True)
             with dpg.texture_registry():
@@ -171,7 +175,7 @@ class MainApp():
             self.ctTexParams['pMin'] = (paddingW+1, paddingH+1)
             self.ctTexParams['pMax'] = (paddingW+newWidth-1, paddingH+newHeight-1)
 
-            self.ctTexParams['nbSlices'] = nz
+            self.ctTexParams['nbSlices'] = nz-1
 
             # Configure the slicer and draw the first image
             dpg.configure_item('slicerCT', default_value=nz//2, max_value=nz)
@@ -180,7 +184,7 @@ class MainApp():
                            pmax=self.ctTexParams['pMax'], 
                            uv_min=(0, 0), uv_max=(1, 1),
                            id='imageCT')
-            """
+            
 
         else:
             pass # TODO
@@ -227,8 +231,36 @@ class MainApp():
         self.updateCarmDraw()
 
     def callBackResetCarm(self, sender, app_data):
+        ang = 0
+        ang = np.pi*ang / 180.0
+
+        ca = np.cos(ang)
+        sa = np.sin(ang)
+        self.carmRotX[0] = [1,  0,   0]
+        self.carmRotX[1] = [0, ca, -sa]
+        self.carmRotX[2] = [0, sa,  ca]
+
+        ca = np.cos(ang)
+        sa = np.sin(ang)
+        self.carmRotZ[0] = [ca, -sa, 0]
+        self.carmRotZ[1] = [sa,  ca, 0]
+        self.carmRotZ[2] = [ 0,   0, 1]
+
+        self.carmTranslation[0][0] = 0
+        self.carmTranslation[1][0] = 0
+        self.carmTranslation[2][0] = 0
+        self.fluoEnergy = 80.0
+        self.fluoRequestMuMap = True
+
+        dpg.configure_item('sliderLAORAO', default_value=0)
+        dpg.configure_item('sliderCAUCRA', default_value=0)
+        dpg.configure_item('sliderTX', default_value=0)
+        dpg.configure_item('sliderTY', default_value=0)
+        dpg.configure_item('sliderTZ', default_value=0)
+        dpg.configure_item('inputVoltage', default_value=80.0)
+
         self.updateCarmDraw()
-        pass
+        
 
     def callBackVoltage(self, sender, app_data):
         self.fluoEnergy = app_data
@@ -242,16 +274,45 @@ class MainApp():
 
         if self.fluoRequestMuMap:
             #                            kVp -> peak MeV
-            self.fluoEngine.setSource(0.01*self.fluoEnergy/2.0, self.carmDistISOSource)
+            self.fluoEngine.setSource(0.001*self.fluoEnergy/2.0, self.carmDistISOSource)
             self.fluoEngine.setImage(self.arrayRaw, self.dictHeader)
             self.fluoEngine.computeMuMap()
             self.fluoRequestMuMap = False
-            print('Convertion: ok')
 
         imageDDR = self.fluoEngine.getProjection()
+        image = array2image(imageDDR)
 
-        self.draw2DArrayTo(imageDDR, 'render_carm_ddr', 'texture_ddr', self.fluoPanelNx, self.fluoPanelNy, 
-                           self.carmDrawWidth, self.carmDrawHeight)
+        # Manage ratio and centering
+        ratio = self.fluoPanelNx / self.fluoPanelNy
+        if ratio > 1:
+            newWidth = self.carmDrawWidth
+            newHeight = self.carmDrawWidth / ratio
+            paddingH = (self.carmDrawHeight-newHeight) / 2.0
+            paddingW = 0
+        elif ratio < 1:
+            newWidth = self.carmDrawHeight * ratio
+            newHeight = self.carmDrawHeight
+            paddingH = 0
+            paddingW = (self.carmDrawWidth-newWidth) / 2.0
+        else:
+            newWidth = self.carmDrawWidth
+            newHeight = self.carmDrawHeight
+            paddingH = 0
+            paddingW = 0
+
+        if self.fluoFlagFirstViewing:
+            with dpg.texture_registry():
+                dpg.add_dynamic_texture(self.fluoPanelNx, self.fluoPanelNy, image, id='texture_ddr')
+
+            dpg.draw_image(parent='render_carm_ddr', texture_id='texture_ddr', 
+                            pmin=(paddingW+1, paddingH+1), 
+                            pmax=(paddingW+newWidth-1, paddingH+newHeight-1), 
+                            uv_min=(0, 0), uv_max=(1, 1),
+                            id='imageFluo')
+
+            self.fluoFlagFirstViewing = False
+        else:
+            dpg.set_value('texture_ddr', image) 
 
 
     def updateCarmConfiguration(self):
@@ -478,7 +539,7 @@ class MainApp():
             dpg.add_text('LAO')
             dpg.add_same_line(spacing=10)
             dpg.add_slider_float(default_value=0, min_value=-40, max_value=40, 
-                                 format="%.0f deg", callback=self.callBackLAORAO)
+                                 format="%.0f deg", callback=self.callBackLAORAO, id='sliderLAORAO')
             dpg.add_same_line(spacing=10)
             dpg.add_text('RAO')
             dpg.add_same_line(spacing=30)
@@ -487,29 +548,29 @@ class MainApp():
             dpg.add_text('CAU')
             dpg.add_same_line(spacing=10)
             dpg.add_slider_float(default_value=0, min_value=-40, max_value=40, 
-                                 format="%.0f deg", callback=self.callBackCAUCRA)
+                                 format="%.0f deg", callback=self.callBackCAUCRA, id='sliderCAUCRA')
             dpg.add_same_line(spacing=10)
             dpg.add_text('CRA')
 
             dpg.add_text('Trans X')
             dpg.add_same_line(spacing=10)
             dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
-                                 format="%.0f mm", callback=self.callBackTransX)
+                                 format="%.0f mm", callback=self.callBackTransX, id='sliderTX')
 
             dpg.add_text('Trans Y')
             dpg.add_same_line(spacing=10)
             dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
-                                 format="%.0f mm", callback=self.callBackTransY)
+                                 format="%.0f mm", callback=self.callBackTransY, id='sliderTY')
 
             dpg.add_text('Trans Z')
             dpg.add_same_line(spacing=10)
             dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
-                                 format="%.0f mm", callback=self.callBackTransZ)
+                                 format="%.0f mm", callback=self.callBackTransZ, id='sliderTZ')
 
             dpg.add_text('Tube voltage')
             dpg.add_same_line(spacing=10)
             dpg.add_input_float(default_value=self.fluoEnergy, min_value=40, max_value=140, 
-                                format="%.2f kV", step=1, callback=self.callBackVoltage)
+                                format="%.2f kV", step=1, callback=self.callBackVoltage, id='inputVoltage')
             
 
             dpg.add_button(label='Reset', callback=self.callBackResetCarm)
