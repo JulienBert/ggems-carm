@@ -15,6 +15,7 @@ class MainApp():
 
         with dpg.file_dialog(directory_selector=False, show=False, callback=self.open_mhd, id='file_dialog_id'):
             dpg.add_file_extension(".mhd", color=(255, 255, 0, 255))
+        self.phantomFilePath = ''
 
         self.colorTitle = (15, 157, 255, 255)  # Blue
         self.colorInfo = (255, 255, 0, 255)  # Yellow
@@ -100,46 +101,13 @@ class MainApp():
         self.patientHead = (100*scaling)  # radius in mm
         self.patientArm = (100*scaling, 400*scaling, 100*scaling)  # offset, length, thickness in mm
 
-
-    # def draw2DArrayTo(self, aImage, parent_id, draw_id, tex_id, nx, ny, width, height):
-    #     image = array2image(aImage)
-
-    #     with dpg.texture_registry():
-    #         dpg.add_static_texture(nx, ny, image, id=tex_id)
-
-    #     # Manage ratio and centering
-    #     ratio = nx / ny
-    #     if ratio > 1:
-    #         newWidth = width
-    #         newHeight = width / ratio
-    #         paddingH = (height-newHeight) / 2.0
-    #         paddingW = 0
-    #     elif ratio < 1:
-    #         newWidth = height * ratio
-    #         newHeight = height
-    #         paddingH = 0
-    #         paddingW = (width-newWidth) / 2.0
-    #     else:
-    #         newWidth = width
-    #         newHeight = height
-    #         paddingH = 0
-    #         paddingW = 0
-
-    #     if dpg.does_item_exist(draw_id):
-    #         dpg.delete_item(draw_id)
-    #     dpg.draw_image(parent=parent_id, texture_id=tex_id, 
-    #                    pmin=(paddingW+1, paddingH+1), 
-    #                    pmax=(paddingW+newWidth-1, paddingH+newHeight-1), 
-    #                    uv_min=(0, 0), uv_max=(1, 1),
-    #                    id=draw_id) 
-
-
     def open_mhd(self, sender, app_data):
         # print("Sender: ", sender)
         # print("App Data: ", app_data)
 
         if app_data['file_name'] != '.mhd':
-            self.arrayRaw, self.dictHeader = importMHD(app_data['file_path_name'])
+            self.phantomFilePath = app_data['file_path_name']
+            self.arrayRaw, self.dictHeader = importMHD(self.phantomFilePath)
             nx, ny, nz = self.dictHeader['shape']
             sx, sy, sz = self.dictHeader['spacing']
             filename = app_data['file_name']
@@ -185,7 +153,6 @@ class MainApp():
                            uv_min=(0, 0), uv_max=(1, 1),
                            id='imageCT')
             
-
         else:
             pass # TODO
 
@@ -199,6 +166,10 @@ class MainApp():
 
     def callBackSlicerMasks(self):
         pass
+
+    def callBackMoveToStep2(self):
+        # Enable Step2
+        dpg.configure_item('groupStep2', show=True)
 
     def callBackLAORAO(self, sender, app_data):
         ang = np.pi*app_data / 180.0
@@ -314,6 +285,130 @@ class MainApp():
         else:
             dpg.set_value('texture_ddr', image) 
 
+    def callBackGetDDR(self):
+        import spekpy as sp
+        from ggems import *
+
+        # 1. Build spectrum
+        s = sp.Spek(kvp=self.fluoEnergy, th=8) # Create a spectrum U, theta
+        s.filter('Al', 2) # Filter the spectrum 2 mm
+        k, f = s.get_spectrum() # Get the spectrum
+        f /= f.sum()  # normalize
+        k /= 1000.0   # convert keV -> MeV
+
+        file = open('spectrum.temp', 'w')
+        for i in range(len(k)):
+            file.write('%0.10f %0.10f\n' % (k[i], f[i]))
+        file.close()
+
+        # 2. Get data
+        device_id = dpg.get_value('inputGPUID')
+        nb_particles = np.int64(dpg.get_value('inputNbParticles'))
+        flagTLE = dpg.get_value('checkTLE')
+
+        # 3. GGEMS
+
+        # Verbo
+        GGEMSVerbosity(0)
+
+        # Device
+        opencl_manager = GGEMSOpenCLManager()
+        opencl_manager.set_device_index(device_id)
+
+        # Material
+        materials_database_manager = GGEMSMaterialsDatabaseManager()
+        materials_database_manager.set_materials('src/materials.txt')
+
+        # Loading phantom
+        phantom0 = GGEMSVoxelizedPhantom('phantom')
+        phantom0.set_phantom(self.phantomFilePath, 'src/HU2mat.txt')
+        phantom0.set_rotation(0.0, 0.0, 0.0, 'deg')
+        phantom0.set_position(0.0, 0.0, 0.0, 'mm')    ####### TODO
+
+        # ------------------------------------------------------------------------------
+        # STEP 4: Dosimetry
+        dosimetry = GGEMSDosimetryCalculator()
+        dosimetry.attach_to_navigator('phantom')
+        dosimetry.set_output_basename('output/dosimetry')
+        dosimetry.set_dosel_size(2.4, 2.4, 2.4, 'mm')
+        dosimetry.water_reference(False)
+        dosimetry.minimum_density(0.1, 'g/cm3')
+        dosimetry.set_tle(flagTLE)
+
+        dosimetry.uncertainty(True)
+        dosimetry.photon_tracking(False)
+        dosimetry.edep(False)
+        dosimetry.hit(False)
+        dosimetry.edep_squared(False)
+
+        # Detector
+        ct_detector = GGEMSCTSystem('C-arm')
+        ct_detector.set_ct_type('flat')
+        ct_detector.set_number_of_modules(1, 1)
+        ct_detector.set_number_of_detection_elements(300, 300, 1)
+        ct_detector.set_size_of_detection_elements(1, 1, 1, 'mm')
+        ct_detector.set_material('GSO')
+        ct_detector.set_source_detector_distance(self.carmDistISOSource+self.carmDistISOPanel, 'mm')
+        ct_detector.set_source_isocenter_distance(self.carmDistISOSource, 'mm')
+        ct_detector.set_rotation(0.0, 0.0, -90.0, 'deg')     ####### TODO
+        ct_detector.set_threshold(10.0, 'keV')
+        ct_detector.save('output/projection.mhd')
+
+        # ------------------------------------------------------------------------------
+        # STEP 5: Physics
+        processes_manager = GGEMSProcessesManager()
+        processes_manager.add_process('Compton', 'gamma', 'all')
+        processes_manager.add_process('Photoelectric', 'gamma', 'all')
+        processes_manager.add_process('Rayleigh', 'gamma', 'all')
+
+        # Optional options, the following are by default
+        processes_manager.set_cross_section_table_number_of_bins(220)
+        processes_manager.set_cross_section_table_energy_min(1.0, 'keV')
+        processes_manager.set_cross_section_table_energy_max(1.0, 'MeV')
+
+        # ------------------------------------------------------------------------------
+        # STEP 6: Cuts, by default but are 1 um
+        range_cuts_manager = GGEMSRangeCutsManager()
+        range_cuts_manager.set_cut('gamma', 0.1, 'mm', 'all')
+
+        # ------------------------------------------------------------------------------
+        # STEP 7: Source
+        point_source = GGEMSXRaySource('xsource')
+        point_source.set_source_particle_type('gamma')
+        point_source.set_number_of_particles(nb_particles)   ### 
+        point_source.set_position(-self.carmDistISOSource, 0.0, 0.0, 'mm')
+        point_source.set_rotation(0.0, 0.0, -90.0, 'deg')     ####### TODO
+        point_source.set_beam_aperture(10.0, 'deg')           ####### TODO   Add on GUI
+        point_source.set_focal_spot_size(0.0, 0.0, 0.0, 'mm')
+        point_source.set_polyenergy('spectrum.temp')
+
+        # ------------------------------------------------------------------------------
+        # STEP 8: GGEMS simulation
+        ggems = GGEMS()
+        ggems.opencl_verbose(False)
+        ggems.material_database_verbose(False)
+        ggems.navigator_verbose(False)
+        ggems.source_verbose(False)
+        ggems.memory_verbose(False)
+        ggems.process_verbose(False)
+        ggems.range_cuts_verbose(False)
+        ggems.random_verbose(False)
+        ggems.profiling_verbose(False)
+        ggems.tracking_verbose(False, 0)
+
+        # Initializing the GGEMS simulation
+        seed = 123456789
+        ggems.initialize(seed)
+
+        # Start GGEMS simulation
+        ggems.run()
+
+        # ------------------------------------------------------------------------------
+        # STEP 9: Exit code
+        dosimetry.delete()
+        ggems.delete()
+        opencl_manager.clean()
+                        
 
     def updateCarmConfiguration(self):
         # Update source position
@@ -514,66 +609,98 @@ class MainApp():
             dpg.add_slider_int(default_value=0, min_value=0, max_value=0, width=self.ctDrawWidth,
                                callback=self.callBackSlicerMasks, id='slicerMasks')
 
+            dpg.add_same_line(spacing=50)
+            dpg.add_button(label='Next step', callback=self.callBackMoveToStep2)
+
             ####################################################################
             dpg.add_separator()
-            dpg.add_text('Step 2', color=self.colorTitle)
-            dpg.add_text('Imaging system parameters:')
-            dpg.add_drawlist(id='render_carm_left', width=self.carmDrawWidth, height=self.carmDrawHeight)
-            # Frame
-            dpg.draw_polygon(parent='render_carm_left', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
-                             (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))         
 
-            dpg.add_same_line(spacing=0)
-            dpg.add_drawlist(id='render_carm_top', width=self.carmDrawWidth, height=self.carmDrawHeight)
-            # Frame
-            dpg.draw_polygon(parent='render_carm_top', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
-                             (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+            with dpg.group(id='groupStep2', show=True):
+                dpg.add_text('Step 2', color=self.colorTitle)
+                dpg.add_text('Imaging system parameters:')
+                dpg.add_drawlist(id='render_carm_left', width=self.carmDrawWidth, height=self.carmDrawHeight)
+                # Frame
+                dpg.draw_polygon(parent='render_carm_left', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
+                                (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))         
 
-            dpg.add_same_line(spacing=0)
-            dpg.add_drawlist(id='render_carm_ddr', width=self.carmDrawWidth, height=self.carmDrawHeight)
-            # Frame
-            dpg.draw_polygon(parent='render_carm_ddr', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
-                             (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+                dpg.add_same_line(spacing=0)
+                dpg.add_drawlist(id='render_carm_top', width=self.carmDrawWidth, height=self.carmDrawHeight)
+                # Frame
+                dpg.draw_polygon(parent='render_carm_top', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
+                                (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+
+                dpg.add_same_line(spacing=0)
+                dpg.add_drawlist(id='render_carm_ddr', width=self.carmDrawWidth, height=self.carmDrawHeight)
+                # Frame
+                dpg.draw_polygon(parent='render_carm_ddr', points=[(0, 0), (self.carmDrawWidth, 0), (self.carmDrawWidth, self.carmDrawHeight), 
+                                (0, self.carmDrawHeight), (0, 0)], color=(255, 255, 255, 255))
 
 
-            dpg.add_text('LAO')
-            dpg.add_same_line(spacing=10)
-            dpg.add_slider_float(default_value=0, min_value=-40, max_value=40, 
-                                 format="%.0f deg", callback=self.callBackLAORAO, id='sliderLAORAO')
-            dpg.add_same_line(spacing=10)
-            dpg.add_text('RAO')
-            dpg.add_same_line(spacing=30)
-            dpg.add_button(label='Get DDR', callback=self.callBackGetDDR)
+                dpg.add_text('LAO')
+                dpg.add_same_line(spacing=10)
+                dpg.add_slider_float(default_value=0, min_value=-40, max_value=40, 
+                                    format="%.0f deg", callback=self.callBackLAORAO, id='sliderLAORAO')
+                dpg.add_same_line(spacing=10)
+                dpg.add_text('RAO')
 
-            dpg.add_text('CAU')
-            dpg.add_same_line(spacing=10)
-            dpg.add_slider_float(default_value=0, min_value=-40, max_value=40, 
-                                 format="%.0f deg", callback=self.callBackCAUCRA, id='sliderCAUCRA')
-            dpg.add_same_line(spacing=10)
-            dpg.add_text('CRA')
+                dpg.add_text('CAU')
+                dpg.add_same_line(spacing=10)
+                dpg.add_slider_float(default_value=0, min_value=-40, max_value=40, 
+                                    format="%.0f deg", callback=self.callBackCAUCRA, id='sliderCAUCRA')
+                dpg.add_same_line(spacing=10)
+                dpg.add_text('CRA')
 
-            dpg.add_text('Trans X')
-            dpg.add_same_line(spacing=10)
-            dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
-                                 format="%.0f mm", callback=self.callBackTransX, id='sliderTX')
+                dpg.add_text('Trans X')
+                dpg.add_same_line(spacing=10)
+                dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
+                                    format="%.0f mm", callback=self.callBackTransX, id='sliderTX')
 
-            dpg.add_text('Trans Y')
-            dpg.add_same_line(spacing=10)
-            dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
-                                 format="%.0f mm", callback=self.callBackTransY, id='sliderTY')
+                dpg.add_text('Trans Y')
+                dpg.add_same_line(spacing=10)
+                dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
+                                    format="%.0f mm", callback=self.callBackTransY, id='sliderTY')
 
-            dpg.add_text('Trans Z')
-            dpg.add_same_line(spacing=10)
-            dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
-                                 format="%.0f mm", callback=self.callBackTransZ, id='sliderTZ')
+                dpg.add_text('Trans Z')
+                dpg.add_same_line(spacing=10)
+                dpg.add_slider_float(default_value=0, min_value=-100, max_value=100, 
+                                    format="%.0f mm", callback=self.callBackTransZ, id='sliderTZ')
 
-            dpg.add_text('Tube voltage')
-            dpg.add_same_line(spacing=10)
-            dpg.add_input_float(default_value=self.fluoEnergy, min_value=40, max_value=140, 
-                                format="%.2f kV", step=1, callback=self.callBackVoltage, id='inputVoltage')
-            
+                dpg.add_text('Tube voltage')
+                dpg.add_same_line(spacing=10)
+                dpg.add_input_float(default_value=self.fluoEnergy, min_value=40, max_value=140, 
+                                    format="%.2f kV", step=1, callback=self.callBackVoltage, id='inputVoltage')
+                
+                dpg.add_button(label='Reset', callback=self.callBackResetCarm)
+                dpg.add_same_line(spacing=10)
+                dpg.add_button(label='Get DDR', callback=self.callBackGetDDR)
+                dpg.add_same_line(spacing=10)
+                dpg.add_button(label='Next step') #, callback=self.callBackGetDDR)
 
-            dpg.add_button(label='Reset', callback=self.callBackResetCarm)
+            ####################################################################
+            dpg.add_separator()
+
+            with dpg.group(id='groupStep3', show=True):
+                dpg.add_text('Step 3', color=self.colorTitle)
+                dpg.add_text('Simulation parameters:')
+
+                dpg.add_text('GPU id')
+                dpg.add_same_line(spacing=10)
+                dpg.add_input_int(default_value=0, min_value=-1, max_value=5, step=1, 
+                                  width=100, id='inputGPUID')
+                                  #callback=self.callBackVoltage, id='inputVoltage')
+
+                dpg.add_text('Number of particles:')
+                dpg.add_same_line(spacing=10)
+                dpg.add_input_int(default_value=1, min_value=1, max_value=1000, step=1, 
+                                  width=100, id='inputNbParticles')
+                dpg.add_same_line(spacing=10)
+                dpg.add_text('x10^6')
+
+                dpg.add_text('Used TLE:')
+                dpg.add_same_line(spacing=10)
+                dpg.add_checkbox(default_value=True, id='checkTLE')
+
+                dpg.add_button(label='Run', width=100, height=50, callback=self.callBackGetDDR)                
 
             ########## Popup ################################
             with dpg.window(label='Info', pos=(self.mainWinWidth//4, self.mainWinHeight//2), width=self.mainWinWidth//2, # height=self.mainWinHeight, pos=(0, 0), no_background=True,
