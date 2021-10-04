@@ -1,4 +1,5 @@
 import dearpygui.dearpygui as dpg
+from numpy.core.fromnumeric import size
 from tools import importMHD, array2image
 import numpy as np
 from fluoroscopy import fluoroscopy
@@ -16,6 +17,7 @@ class MainApp():
         with dpg.file_dialog(directory_selector=False, show=False, callback=self.open_mhd, id='file_dialog_id'):
             dpg.add_file_extension(".mhd", color=(255, 255, 0, 255))
         self.phantomFilePath = ''
+        self.flagPhantomLoaded = False
 
         self.colorTitle = (15, 157, 255, 255)  # Blue
         self.colorInfo = (255, 255, 0, 255)  # Yellow
@@ -152,6 +154,8 @@ class MainApp():
                            pmax=self.ctTexParams['pMax'], 
                            uv_min=(0, 0), uv_max=(1, 1),
                            id='imageCT')
+
+            dpg.configure_item('groupStep2', show=True)
             
         else:
             pass # TODO
@@ -166,10 +170,6 @@ class MainApp():
 
     def callBackSlicerMasks(self):
         pass
-
-    def callBackMoveToStep2(self):
-        # Enable Step2
-        dpg.configure_item('groupStep2', show=True)
 
     def callBackLAORAO(self, sender, app_data):
         ang = np.pi*app_data / 180.0
@@ -283,11 +283,24 @@ class MainApp():
 
             self.fluoFlagFirstViewing = False
         else:
-            dpg.set_value('texture_ddr', image) 
+            dpg.set_value('texture_ddr', image)
 
-    def callBackGetDDR(self):
-        import spekpy as sp
-        from ggems import *
+        dpg.configure_item('groupStep3', show=True) 
+
+    def callBackRunGGEMS(self):
+        from sys import exit
+        try:
+            import spekpy as sp
+        except:
+            print('Impossible to load spekpy module')
+            exit()
+
+        try:
+            from ggems import GGEMSVerbosity, GGEMSOpenCLManager, GGEMSMaterialsDatabaseManager, GGEMSCTSystem, GGEMSRangeCutsManager
+            from ggems import GGEMSVoxelizedPhantom, GGEMSDosimetryCalculator, GGEMSProcessesManager, GGEMSXRaySource, GGEMS
+        except:
+            print('Impossible to load GGEMS module')
+            exit()
 
         # 1. Build spectrum
         s = sp.Spek(kvp=self.fluoEnergy, th=8) # Create a spectrum U, theta
@@ -303,13 +316,27 @@ class MainApp():
 
         # 2. Get data
         device_id = dpg.get_value('inputGPUID')
-        nb_particles = np.int64(dpg.get_value('inputNbParticles'))
+        nb_particles = np.int64(dpg.get_value('inputNbParticles')) * np.int64(1e06)
         flagTLE = dpg.get_value('checkTLE')
 
-        # 3. GGEMS
+        angZ = dpg.get_value('sliderLAORAO') - 90  # change org
+        angX = dpg.get_value('sliderCAUCRA')
+        tx = float(-self.carmTranslation[0][0])           # Instead moving the c-arm we move the phantom
+        ty = float(-self.carmTranslation[1][0]) 
+        tz = float(-self.carmTranslation[2][0])
+        sx, sy, sz = self.dictHeader['spacing']
+        angAperture = dpg.get_value('inputAperture')
 
+        print('#### Info ####')
+        print('id', device_id, 'nbphot', nb_particles, 'flagTLE', flagTLE)
+        print('ang', angX, angZ, 'T', tx, ty, tz)
+        print('Scaling', sx, sy, sz)
+        print('Aperture', angAperture)
+
+        # 3. GGEMS
+        
         # Verbo
-        GGEMSVerbosity(0)
+        GGEMSVerbosity(1)
 
         # Device
         opencl_manager = GGEMSOpenCLManager()
@@ -320,17 +347,18 @@ class MainApp():
         materials_database_manager.set_materials('src/materials.txt')
 
         # Loading phantom
+        tx, ty, tx = self.carmTranslation
         phantom0 = GGEMSVoxelizedPhantom('phantom')
         phantom0.set_phantom(self.phantomFilePath, 'src/HU2mat.txt')
         phantom0.set_rotation(0.0, 0.0, 0.0, 'deg')
-        phantom0.set_position(0.0, 0.0, 0.0, 'mm')    ####### TODO
+        phantom0.set_position(tx, ty, tz, 'mm')
 
         # ------------------------------------------------------------------------------
         # STEP 4: Dosimetry
         dosimetry = GGEMSDosimetryCalculator()
         dosimetry.attach_to_navigator('phantom')
         dosimetry.set_output_basename('output/dosimetry')
-        dosimetry.set_dosel_size(2.4, 2.4, 2.4, 'mm')
+        dosimetry.set_dosel_size(sx, sy, sz, 'mm')
         dosimetry.water_reference(False)
         dosimetry.minimum_density(0.1, 'g/cm3')
         dosimetry.set_tle(flagTLE)
@@ -345,12 +373,12 @@ class MainApp():
         ct_detector = GGEMSCTSystem('C-arm')
         ct_detector.set_ct_type('flat')
         ct_detector.set_number_of_modules(1, 1)
-        ct_detector.set_number_of_detection_elements(300, 300, 1)
-        ct_detector.set_size_of_detection_elements(1, 1, 1, 'mm')
+        ct_detector.set_number_of_detection_elements(self.fluoPanelNx, self.fluoPanelNy, 1)
+        ct_detector.set_size_of_detection_elements(self.fluoPanelSx, self.fluoPanelSy, 1, 'mm')
         ct_detector.set_material('GSO')
         ct_detector.set_source_detector_distance(self.carmDistISOSource+self.carmDistISOPanel, 'mm')
         ct_detector.set_source_isocenter_distance(self.carmDistISOSource, 'mm')
-        ct_detector.set_rotation(0.0, 0.0, -90.0, 'deg')     ####### TODO
+        ct_detector.set_rotation(angX, 0.0, angZ, 'deg')
         ct_detector.set_threshold(10.0, 'keV')
         ct_detector.save('output/projection.mhd')
 
@@ -377,8 +405,8 @@ class MainApp():
         point_source.set_source_particle_type('gamma')
         point_source.set_number_of_particles(nb_particles)   ### 
         point_source.set_position(-self.carmDistISOSource, 0.0, 0.0, 'mm')
-        point_source.set_rotation(0.0, 0.0, -90.0, 'deg')     ####### TODO
-        point_source.set_beam_aperture(10.0, 'deg')           ####### TODO   Add on GUI
+        point_source.set_rotation(angX, 0.0, angZ, 'deg')
+        point_source.set_beam_aperture(angAperture, 'deg')
         point_source.set_focal_spot_size(0.0, 0.0, 0.0, 'mm')
         point_source.set_polyenergy('spectrum.temp')
 
@@ -408,6 +436,7 @@ class MainApp():
         dosimetry.delete()
         ggems.delete()
         opencl_manager.clean()
+        
                         
 
     def updateCarmConfiguration(self):
@@ -609,13 +638,11 @@ class MainApp():
             dpg.add_slider_int(default_value=0, min_value=0, max_value=0, width=self.ctDrawWidth,
                                callback=self.callBackSlicerMasks, id='slicerMasks')
 
-            dpg.add_same_line(spacing=50)
-            dpg.add_button(label='Next step', callback=self.callBackMoveToStep2)
-
             ####################################################################
-            dpg.add_separator()
+            
+            with dpg.group(id='groupStep2', show=False):
+                dpg.add_separator()
 
-            with dpg.group(id='groupStep2', show=True):
                 dpg.add_text('Step 2', color=self.colorTitle)
                 dpg.add_text('Imaging system parameters:')
                 dpg.add_drawlist(id='render_carm_left', width=self.carmDrawWidth, height=self.carmDrawHeight)
@@ -667,25 +694,29 @@ class MainApp():
 
                 dpg.add_text('Tube voltage')
                 dpg.add_same_line(spacing=10)
-                dpg.add_input_float(default_value=self.fluoEnergy, min_value=40, max_value=140, 
+                dpg.add_input_float(default_value=self.fluoEnergy, min_value=40, max_value=140, width=200,
                                     format="%.2f kV", step=1, callback=self.callBackVoltage, id='inputVoltage')
+                
+                dpg.add_text('Beam aperture')
+                dpg.add_same_line(spacing=10)
+                dpg.add_input_float(default_value=10, min_value=5, max_value=15, width=200,
+                                    format="%.1f deg", step=1, id='inputAperture')
                 
                 dpg.add_button(label='Reset', callback=self.callBackResetCarm)
                 dpg.add_same_line(spacing=10)
                 dpg.add_button(label='Get DDR', callback=self.callBackGetDDR)
-                dpg.add_same_line(spacing=10)
-                dpg.add_button(label='Next step') #, callback=self.callBackGetDDR)
 
             ####################################################################
-            dpg.add_separator()
 
-            with dpg.group(id='groupStep3', show=True):
+            with dpg.group(id='groupStep3', show=False):
+                dpg.add_separator()
+
                 dpg.add_text('Step 3', color=self.colorTitle)
                 dpg.add_text('Simulation parameters:')
 
                 dpg.add_text('GPU id')
                 dpg.add_same_line(spacing=10)
-                dpg.add_input_int(default_value=0, min_value=-1, max_value=5, step=1, 
+                dpg.add_input_int(default_value=2, min_value=-1, max_value=5, step=1, 
                                   width=100, id='inputGPUID')
                                   #callback=self.callBackVoltage, id='inputVoltage')
 
@@ -700,7 +731,7 @@ class MainApp():
                 dpg.add_same_line(spacing=10)
                 dpg.add_checkbox(default_value=True, id='checkTLE')
 
-                dpg.add_button(label='Run', width=100, height=50, callback=self.callBackGetDDR)                
+                dpg.add_button(label='Run', width=100, height=50, callback=self.callBackRunGGEMS)                
 
             ########## Popup ################################
             with dpg.window(label='Info', pos=(self.mainWinWidth//4, self.mainWinHeight//2), width=self.mainWinWidth//2, # height=self.mainWinHeight, pos=(0, 0), no_background=True,
