@@ -33,7 +33,7 @@ def array2image(aData):
 
     return core_array2image(image, aData, nx, ny).tolist()
 
-# open MHD file V1.2
+# open MHD file V1.3
 def importMHD(pathfilename):
 
     name, ext = splitext(pathfilename)
@@ -152,8 +152,13 @@ def importMHD(pathfilename):
         print('[ERROR] NDims tag missing!')
         sys.exit()
     if flagOffset is False:
-        print('[ERROR] Offset tag missing!')
-        sys.exit()
+        print('[WARNING] Offset tag missing!')
+        if ndim == 1:
+            ox =0
+        elif ndim == 2:
+            ox, oy = 0, 0
+        elif ndim == 3:
+            ox, oy, oz = 0, 0, 0
     if flagSpacing is False:
         print('[ERROR] ElementSpacing tag missing!')
         sys.exit()

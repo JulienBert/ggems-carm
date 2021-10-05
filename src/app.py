@@ -7,10 +7,10 @@ from fluoroscopy import fluoroscopy
 class MainApp():
     def __init__(self):
         self.mainWinWidth = 630
-        self.mainWinHeight = 1080
+        self.mainWinHeight = 1300
 
         vp = dpg.create_viewport(title='GGEMS C-Arm', width=self.mainWinWidth, height=self.mainWinHeight, 
-                                 clear_color=(39, 44, 53, 255)) # create viewport takes in config options too!
+                                 clear_color=(39, 44, 53, 255), x_pos=0, y_pos=0) # create viewport takes in config options too!
         dpg.setup_dearpygui(viewport=vp)
         dpg.show_viewport(vp)
 
@@ -117,6 +117,7 @@ class MainApp():
             dpg.set_value('txt_info_image_file', txt)
             
             # Convert into texture
+            dpg.set_value('txtInfo', 'Loading...')
             dpg.configure_item('infoWindow', show=True)
             with dpg.texture_registry():
                 for iSlice in range(nz):
@@ -334,9 +335,11 @@ class MainApp():
         print('Aperture', angAperture)
 
         # 3. GGEMS
-        
+        dpg.set_value('txtInfo', 'Running...')
+        dpg.configure_item('infoWindow', show=True)
+
         # Verbo
-        GGEMSVerbosity(1)
+        GGEMSVerbosity(0)
 
         # Device
         opencl_manager = GGEMSOpenCLManager()
@@ -430,14 +433,18 @@ class MainApp():
 
         # Start GGEMS simulation
         ggems.run()
-
+        
         # ------------------------------------------------------------------------------
         # STEP 9: Exit code
         dosimetry.delete()
         ggems.delete()
         opencl_manager.clean()
-        
-                        
+
+        dpg.configure_item('infoWindow', show=False)
+
+        # Show result
+        self.showResult()
+                
 
     def updateCarmConfiguration(self):
         # Update source position
@@ -606,7 +613,91 @@ class MainApp():
         dpg.configure_item('t_los_3', p1=(px, py), p2=p3)
         dpg.configure_item('t_los_4', p1=(px, py), p2=p4)
 
+    def showResult(self):
+        import os
+        if os.path.isfile('output/dosimetry_dose.mhd') and os.path.isfile('output/projection.mhd'):
+            # Dose map
+            rawDose, dictHeaderDose = importMHD('output/dosimetry_dose.mhd')
+            
+            nx, ny, nz = dictHeaderDose['shape']
+            
+            # Sum dose slice
+            sliceDose = rawDose.sum(axis=0)
 
+            # Convert into texture
+            with dpg.texture_registry():
+                image = array2image(sliceDose)
+                dpg.add_static_texture(nx, ny, image, id='tex_dose')
+            
+            # Manage ratio and centering
+            ratio = nx / ny
+            if ratio > 1:
+                newWidth = self.ctDrawWidth
+                newHeight = self.ctDrawWidth / ratio
+                paddingH = (self.ctDrawHeight-newHeight) / 2.0
+                paddingW = 0
+            elif ratio < 1:
+                newWidth = self.ctDrawHeight * ratio
+                newHeight = self.ctDrawHeight
+                paddingH = 0
+                paddingW = (self.ctDrawWidth-newWidth) / 2.0
+            else:
+                newWidth = self.ctDrawWidth
+                newHeight = self.ctDrawHeight
+                paddingH = 0
+                paddingW = 0
+
+            pMin = (paddingW+1, paddingH+1)
+            pMax = (paddingW+newWidth-1, paddingH+newHeight-1)
+
+            dpg.draw_image(parent='render_dose', texture_id='tex_dose', 
+                           pmin=pMin, 
+                           pmax=pMax, 
+                           uv_min=(0, 0), uv_max=(1, 1))
+
+            # Projection
+            rawProj, dictHeaderProj = importMHD('output/projection.mhd')
+            rawProj = rawProj[0]
+
+            # Rotate and mirror for display
+            rawProj = np.rot90(rawProj)
+            rawProj = np.flipud(rawProj)
+
+            # Enhance
+            rawProj = np.log(rawProj+1)
+            
+            nx, ny, nz = dictHeaderProj['shape']
+
+            # Convert into texture
+            with dpg.texture_registry():
+                image = array2image(rawProj)
+                dpg.add_static_texture(nx, ny, image, id='tex_proj')
+            
+            # Manage ratio and centering
+            ratio = nx / ny
+            if ratio > 1:
+                newWidth = self.ctDrawWidth
+                newHeight = self.ctDrawWidth / ratio
+                paddingH = (self.ctDrawHeight-newHeight) / 2.0
+                paddingW = 0
+            elif ratio < 1:
+                newWidth = self.ctDrawHeight * ratio
+                newHeight = self.ctDrawHeight
+                paddingH = 0
+                paddingW = (self.ctDrawWidth-newWidth) / 2.0
+            else:
+                newWidth = self.ctDrawWidth
+                newHeight = self.ctDrawHeight
+                paddingH = 0
+                paddingW = 0
+
+            pMin = (paddingW+1, paddingH+1)
+            pMax = (paddingW+newWidth-1, paddingH+newHeight-1)
+
+            dpg.draw_image(parent='render_proj', texture_id='tex_proj', 
+                           pmin=pMin, 
+                           pmax=pMax, 
+                           uv_min=(0, 0), uv_max=(1, 1))
 
     def show(self):
         with dpg.window(label='Main Window', width=self.mainWinWidth, height=self.mainWinHeight, pos=(0, 0), no_background=True,
@@ -722,7 +813,7 @@ class MainApp():
 
                 dpg.add_text('Number of particles:')
                 dpg.add_same_line(spacing=10)
-                dpg.add_input_int(default_value=1, min_value=1, max_value=1000, step=1, 
+                dpg.add_input_int(default_value=10, min_value=1, max_value=1000, step=1, 
                                   width=100, id='inputNbParticles')
                 dpg.add_same_line(spacing=10)
                 dpg.add_text('x10^6')
@@ -731,13 +822,23 @@ class MainApp():
                 dpg.add_same_line(spacing=10)
                 dpg.add_checkbox(default_value=True, id='checkTLE')
 
-                dpg.add_button(label='Run', width=100, height=50, callback=self.callBackRunGGEMS)                
+                dpg.add_button(label='Run', width=100, height=50, callback=self.callBackRunGGEMS)
+
+                dpg.add_drawlist(id='render_dose', width=self.ctDrawWidth, height=self.ctDrawHeight)
+                dpg.draw_polygon(parent='render_dose', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
+                                (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+
+                dpg.add_same_line(spacing=0)
+
+                dpg.add_drawlist(id='render_proj', width=self.ctDrawWidth, height=self.ctDrawHeight)
+                dpg.draw_polygon(parent='render_proj', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
+                                (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))                
 
             ########## Popup ################################
             with dpg.window(label='Info', pos=(self.mainWinWidth//4, self.mainWinHeight//2), width=self.mainWinWidth//2, # height=self.mainWinHeight, pos=(0, 0), no_background=True,
                             no_move=True, no_resize=True, no_collapse=True, no_close=True, no_title_bar=True,
                             id='infoWindow', show=False):
-                dpg.add_text('Loading...')
+                dpg.add_text('Message...', id='txtInfo')
 
         self.firstCarmDraw()
         self.updateCarmDraw()
