@@ -19,19 +19,60 @@ def core_array2image(Image, aData, nx, ny):
             ind += 4
     return Image
 
-def array2image(aData):
+@jit(nopython=True)
+def core_labelStats(vol, mask, label, idLabel, nx, ny, nz):
+    for iz in range(nz):
+        for iy in range(ny):
+            for ix in range(nx):
+                if label[iz, iy, ix] == idLabel:
+                    mask[iz, iy, ix] = vol[iz, iy, ix]
+
+    return mask
+
+def array2image(aData, normalize=True):
     ny, nx = aData.shape
 
     image = zeros(4*nx*ny, 'float32')
+    aData = aData.astype('float32')
 
     # Normalize 01
-    aData = aData.astype('float32')
-    minVal = aData.min()
-    aData -= minVal
-    maxVal = aData.max()
-    aData /= maxVal
+    if normalize:
+        minVal = aData.min()
+        aData -= minVal
+        maxVal = aData.max()
+        if maxVal != 0.0:
+            aData /= maxVal
 
     return core_array2image(image, aData, nx, ny).tolist()
+
+def loadLabels(tableFilename):
+    dictLabels = {}
+
+    f = open(tableFilename, 'r')
+    ct = 0
+    for line in f.readlines():
+        if line[0] == '#':
+            continue
+        
+        # ex. 1 Heart 206 110 84 255
+        elts = line.strip().split()
+        idLabel = elts[0]
+        if idLabel.isdigit():
+            dictLabels[elts[1]] = idLabel
+            ct += 1
+
+    f.close()
+
+    return dictLabels
+        
+def getLabelStats(rawVolume, val, rawLabel):
+    # np.where doesn't work here??????
+    mask = zeros(rawVolume.shape, 'float32')
+
+    nz, ny, nx = rawLabel.shape
+    mask = core_labelStats(rawVolume, mask, rawLabel, val, nx, ny, nz)
+
+    return mask.mean(), mask.std() 
 
 # open MHD file V1.3
 def importMHD(pathfilename):

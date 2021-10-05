@@ -1,8 +1,9 @@
 import dearpygui.dearpygui as dpg
 from numpy.core.fromnumeric import size
-from tools import importMHD, array2image
+from tools import importMHD, array2image, loadLabels, getLabelStats
 import numpy as np
 from fluoroscopy import fluoroscopy
+import os
 
 class MainApp():
     def __init__(self):
@@ -40,6 +41,9 @@ class MainApp():
             'pMax': 0,
             'nbSlices': 0,
         }
+
+        # Labels
+        self.labels = {}
 
         # Fluorscopy viewer
         # Flag that determine if the CT have to be reconvert into mumap
@@ -104,8 +108,6 @@ class MainApp():
         self.patientArm = (100*scaling, 400*scaling, 100*scaling)  # offset, length, thickness in mm
 
     def open_mhd(self, sender, app_data):
-        # print("Sender: ", sender)
-        # print("App Data: ", app_data)
 
         if app_data['file_name'] != '.mhd':
             self.phantomFilePath = app_data['file_path_name']
@@ -149,12 +151,46 @@ class MainApp():
             self.ctTexParams['nbSlices'] = nz-1
 
             # Configure the slicer and draw the first image
-            dpg.configure_item('slicerCT', default_value=nz//2, max_value=nz)
+            dpg.configure_item('slicerCT', default_value=nz//2, max_value=nz-1)
             dpg.draw_image(parent='render_ct', texture_id='CT%i' % (nz//2), 
                            pmin=self.ctTexParams['pMin'], 
                            pmax=self.ctTexParams['pMax'], 
                            uv_min=(0, 0), uv_max=(1, 1),
                            id='imageCT')
+
+            #### Check for labels
+            labelPathName = os.path.dirname(self.phantomFilePath)
+            self.labelFileName = os.path.join(labelPathName, 'Segmentation-label.mhd')
+            labelTableFileName = os.path.join(labelPathName, 'Segmentation-label_ColorTable.txt')
+
+            if os.path.isfile(self.labelFileName) and os.path.isfile(labelTableFileName):
+                self.rawLabel, self.dictLabel = importMHD(self.labelFileName)
+
+                # Convert into texture
+                dpg.set_value('txtInfo', 'Loading...')
+                dpg.configure_item('infoWindow', show=True)
+                with dpg.texture_registry():
+                    for iSlice in range(nz):
+                        image = array2image(self.rawLabel[iSlice])
+                        dpg.add_static_texture(nx, ny, image, id='Label%i' % iSlice)
+                dpg.configure_item('infoWindow', show=False)
+
+                # Draw
+                dpg.draw_image(parent='render_labels', texture_id='Label%i' % (nz//2), 
+                                pmin=self.ctTexParams['pMin'], 
+                                pmax=self.ctTexParams['pMax'], 
+                                uv_min=(0, 0), uv_max=(1, 1),
+                                id='imageLabel')
+
+                # Load labels
+                self.labels = loadLabels(labelTableFileName)
+
+                txt = ''
+                for key in self.labels.keys():
+                    if key != 'Background':
+                        txt += (key + ' ')
+                        
+                dpg.set_value('txt_info_label_file', txt)
 
             dpg.configure_item('groupStep2', show=True)
             
@@ -169,8 +205,12 @@ class MainApp():
                        uv_min=(0, 0), uv_max=(1, 1),
                        id='imageCT')
 
-    def callBackSlicerMasks(self):
-        pass
+        dpg.delete_item('imageLabel')
+        dpg.draw_image(parent='render_labels', texture_id='Label%i' % app_data, 
+                       pmin=self.ctTexParams['pMin'], 
+                       pmax=self.ctTexParams['pMax'], 
+                       uv_min=(0, 0), uv_max=(1, 1),
+                       id='imageLabel')
 
     def callBackLAORAO(self, sender, app_data):
         ang = np.pi*app_data / 180.0
@@ -233,7 +273,6 @@ class MainApp():
 
         self.updateCarmDraw()
         
-
     def callBackVoltage(self, sender, app_data):
         self.fluoEnergy = app_data
         # If the energy change the CT have to convert into mumap accordingly
@@ -445,7 +484,6 @@ class MainApp():
         # Show result
         self.showResult()
                 
-
     def updateCarmConfiguration(self):
         # Update source position
         self.carmPosSource = self.carmRotX * self.carmOrgPosSource
@@ -545,8 +583,7 @@ class MainApp():
 
         ## DDR view #################
         #
-
-        
+  
     def updateCarmDraw(self):
         # Compute new conf
         self.updateCarmConfiguration()
@@ -615,7 +652,7 @@ class MainApp():
 
     def showResult(self):
         import os
-        if os.path.isfile('output/dosimetry_dose.mhd') and os.path.isfile('output/projection.mhd'):
+        if os.path.isfile('output/dosimetry_dose.mhd') and os.path.isfile('output/dosimetry_uncertainty.mhd') and os.path.isfile('output/projection.mhd'):
             # Dose map
             rawDose, dictHeaderDose = importMHD('output/dosimetry_dose.mhd')
             
@@ -699,6 +736,25 @@ class MainApp():
                            pmax=pMax, 
                            uv_min=(0, 0), uv_max=(1, 1))
 
+            ### Stats in table
+            rawUnc, dictHeaderUnc = importMHD('output/dosimetry_uncertainty.mhd')
+
+            if self.labels.keys() != 0:
+                for key, val in self.labels.items():
+                    # Dose
+                    print(key, val, self.rawLabel.mean(), rawDose.mean())
+                    valMean, valSTD = getLabelStats(rawDose, val, self.rawLabel)
+                    print('...', valMean, valSTD)
+
+            # # add_table_next_column will jump to the next row
+            # # once it reaches the end of the columns
+            # # table next column use slot 1
+            # for i in range(0, 4):
+            #     for j in range(0, 3):
+            #         dpg.add_text(f"Row{i} Column{j}", parent='tableResults')
+            #         if not (i == 3 and j == 2):
+            #             dpg.add_table_next_column(parent='tableResults')
+
     def show(self):
         with dpg.window(label='Main Window', width=self.mainWinWidth, height=self.mainWinHeight, pos=(0, 0), no_background=True,
                         no_move=True, no_resize=True, no_collapse=True, no_close=True, no_title_bar=True):
@@ -717,8 +773,8 @@ class MainApp():
 
             dpg.add_same_line(spacing=0)
 
-            dpg.add_drawlist(id='render_masks', width=self.ctDrawWidth, height=self.ctDrawHeight)
-            dpg.draw_polygon(parent='render_masks', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
+            dpg.add_drawlist(id='render_labels', width=self.ctDrawWidth, height=self.ctDrawHeight)
+            dpg.draw_polygon(parent='render_labels', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
                              (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))
 
             dpg.add_slider_int(default_value=0, min_value=0, max_value=0, width=self.ctDrawWidth,
@@ -726,8 +782,7 @@ class MainApp():
 
             dpg.add_same_line(spacing=0)
 
-            dpg.add_slider_int(default_value=0, min_value=0, max_value=0, width=self.ctDrawWidth,
-                               callback=self.callBackSlicerMasks, id='slicerMasks')
+            dpg.add_text('No labels', id='txt_info_label_file', color=self.colorInfo)
 
             ####################################################################
             
@@ -813,7 +868,7 @@ class MainApp():
 
                 dpg.add_text('Number of particles:')
                 dpg.add_same_line(spacing=10)
-                dpg.add_input_int(default_value=10, min_value=1, max_value=1000, step=1, 
+                dpg.add_input_int(default_value=1, min_value=1, max_value=1000, step=1, 
                                   width=100, id='inputNbParticles')
                 dpg.add_same_line(spacing=10)
                 dpg.add_text('x10^6')
@@ -832,7 +887,16 @@ class MainApp():
 
                 dpg.add_drawlist(id='render_proj', width=self.ctDrawWidth, height=self.ctDrawHeight)
                 dpg.draw_polygon(parent='render_proj', points=[(0, 0), (self.ctDrawWidth, 0), (self.ctDrawWidth, self.ctDrawHeight), 
-                                (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))                
+                                (0, self.ctDrawHeight), (0, 0)], color=(255, 255, 255, 255))
+
+                ### Table
+                dpg.add_table(header_row=True, id='tableResults')
+                dpg.add_table_column(parent='tableResults', label='Label')
+                dpg.add_table_column(parent='tableResults', label='Dose [Gy]')
+                dpg.add_table_column(parent='tableResults', label='Uncertainty')
+
+                
+                
 
             ########## Popup ################################
             with dpg.window(label='Info', pos=(self.mainWinWidth//4, self.mainWinHeight//2), width=self.mainWinWidth//2, # height=self.mainWinHeight, pos=(0, 0), no_background=True,
