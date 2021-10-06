@@ -1,5 +1,5 @@
 from os.path import splitext, join, dirname
-from numpy import fromfile, zeros
+from numpy import fromfile, zeros, sqrt
 from numba import jit
 import sys
 
@@ -20,14 +20,25 @@ def core_array2image(Image, aData, nx, ny):
     return Image
 
 @jit(nopython=True)
-def core_labelStats(vol, mask, label, idLabel, nx, ny, nz):
+def core_labelStats(vol, label, idLabel, nx, ny, nz):
+    sv = 0
+    sv2 = 0
+    cc = 0
+
     for iz in range(nz):
         for iy in range(ny):
             for ix in range(nx):
                 if label[iz, iy, ix] == idLabel:
-                    mask[iz, iy, ix] = vol[iz, iy, ix]
+                    val = vol[iz, iy, ix]
+                    sv += val
+                    sv2 += (val*val)
+                    cc += 1
 
-    return mask
+    ni = 1 / float(cc)
+    ave = sv*ni
+    var = ni*(sv2-ni*sv*sv)
+
+    return ave, var
 
 def array2image(aData, normalize=True):
     ny, nx = aData.shape
@@ -67,12 +78,11 @@ def loadLabels(tableFilename):
         
 def getLabelStats(rawVolume, val, rawLabel):
     # np.where doesn't work here??????
-    mask = zeros(rawVolume.shape, 'float32')
 
     nz, ny, nx = rawLabel.shape
-    mask = core_labelStats(rawVolume, mask, rawLabel, val, nx, ny, nz)
+    ave, var = core_labelStats(rawVolume, rawLabel, int(val), nx, ny, nz)
 
-    return mask.mean(), mask.std() 
+    return ave, sqrt(var)
 
 # open MHD file V1.3
 def importMHD(pathfilename):

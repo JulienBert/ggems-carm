@@ -738,22 +738,24 @@ class MainApp():
 
             ### Stats in table
             rawUnc, dictHeaderUnc = importMHD('output/dosimetry_uncertainty.mhd')
+            print(rawUnc.min(), rawUnc.max(), rawUnc.mean(), rawUnc.dtype)
 
             if self.labels.keys() != 0:
                 for key, val in self.labels.items():
+                    if key=='Background': continue
+                    dpg.add_text(key, parent='tableResults')
+                    dpg.add_table_next_column(parent='tableResults')
                     # Dose
-                    print(key, val, self.rawLabel.mean(), rawDose.mean())
                     valMean, valSTD = getLabelStats(rawDose, val, self.rawLabel)
-                    print('...', valMean, valSTD)
-
-            # # add_table_next_column will jump to the next row
-            # # once it reaches the end of the columns
-            # # table next column use slot 1
-            # for i in range(0, 4):
-            #     for j in range(0, 3):
-            #         dpg.add_text(f"Row{i} Column{j}", parent='tableResults')
-            #         if not (i == 3 and j == 2):
-            #             dpg.add_table_next_column(parent='tableResults')
+                    txt = '%0.3e +- %0.3e' % (valMean, valSTD)
+                    dpg.add_text(txt, parent='tableResults')
+                    dpg.add_table_next_column(parent='tableResults')
+                    # Uncertainty
+                    valMean, valSTD = getLabelStats(rawUnc, val, self.rawLabel)
+                    txt = '%0.1f +- %0.1f %%' % (100*valMean, 100*valSTD)
+                    dpg.add_text(txt, parent='tableResults')
+                    dpg.add_table_next_column(parent='tableResults')
+                   
 
     def show(self):
         with dpg.window(label='Main Window', width=self.mainWinWidth, height=self.mainWinHeight, pos=(0, 0), no_background=True,
