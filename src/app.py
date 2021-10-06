@@ -389,7 +389,6 @@ class MainApp():
         materials_database_manager.set_materials('src/materials.txt')
 
         # Loading phantom
-        tx, ty, tx = self.carmTranslation
         phantom0 = GGEMSVoxelizedPhantom('phantom')
         phantom0.set_phantom(self.phantomFilePath, 'src/HU2mat.txt')
         phantom0.set_rotation(0.0, 0.0, 0.0, 'deg')
@@ -738,7 +737,6 @@ class MainApp():
 
             ### Stats in table
             rawUnc, dictHeaderUnc = importMHD('output/dosimetry_uncertainty.mhd')
-            print(rawUnc.min(), rawUnc.max(), rawUnc.mean(), rawUnc.dtype)
 
             if self.labels.keys() != 0:
                 for key, val in self.labels.items():
