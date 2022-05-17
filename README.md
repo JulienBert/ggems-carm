@@ -3,6 +3,10 @@ A GGEMS GUI for C-arm dosimetry application
 
 [![Generic badge](https://img.shields.io/badge/Python-3.7-blue.svg)](https://shields.io/)
 
+### Screenshot
+
+![Image_text](screen.png)
+
 ## Requirements
 
 - python 3.7.9

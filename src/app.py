@@ -12,6 +12,7 @@ class MainApp():
 
         vp = dpg.create_viewport(title='GGEMS C-Arm', width=self.mainWinWidth, height=self.mainWinHeight, 
                                  clear_color=(39, 44, 53, 255), x_pos=0, y_pos=0) # create viewport takes in config options too!
+        dpg.set_global_font_scale(2)
         dpg.setup_dearpygui(viewport=vp)
         dpg.show_viewport(vp)
 
